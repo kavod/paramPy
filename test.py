@@ -4,14 +4,56 @@
 import sys
 import paramPy
 
-p1 = paramPy.PointCusto(id="id",type='text',label='Torrents provider',placeholder="Indicate your torrents provider",required=True,choices={'t411':'T411','kickass':'KickAss'},default='t411',trigger={'t411':'UserRequired'})
-p2 = paramPy.PointCusto(id="user",type='text',label='Torrents provider username',placeholder="Indicate your torrents provider user",required=False,choices=[],default=None)
-p3 = paramPy.PointCusto(id="password",type='password',label='Torrents provider password',placeholder="Indicate your torrents provider password",required=False,choices=[],default=None)
-param_tracker = paramPy.ParamMulti('tracker',items=[p1,p2,p3])
-param = paramPy.Param('conf',items=[param_tracker])
+tracker_id = paramPy.ConfigElement(
+		id="id",
+		type='text',
+		label='Torrents provider',
+		placeholder="Indicate your torrents provider",
+		required=False,
+		choices={'t411':'T411','kickass':'KickAss'},
+		default=None,
+		trigger={'kickass':'NoLogin',None:'NoLogin'}
+		)
+
+tracker_user = paramPy.ConfigElement(
+		id="user",
+		type='text',
+		label='Torrents provider username',
+		placeholder="Indicate your torrents provider user",
+		required=False,
+		choices=[],
+		default=None
+		)
+
+tracker_password = paramPy.ConfigElement(
+		id="password",
+		type='password',
+		label='Torrents provider password',
+		placeholder="Indicate your torrents provider password",
+		required=False,
+		choices=[],
+		default=None
+		)
+
+trigger = [
+		{'src_id':'id','src_status':'NoLogin','dst_id':'user','dst_status':'disabled'},
+		{'src_id':'id','src_status':'NoLogin','dst_id':'password','dst_status':'disabled'}
+		]
+
+param_tracker = paramPy.ParamMulti(
+		id='tracker',
+		label="Torrent provider",
+		items=[tracker_id,tracker_user,tracker_password],
+		trigger=trigger
+		)
+
+param = paramPy.Param(
+		id='conf',
+		items=[param_tracker]
+		)
+
 param.cliPrompt()
-print param[0].values[0][0].getStatus()
-sys.exit()
+print param.getValues()
 param.loadValuesFromJSON({'conf':{'tracker':[{'id':'t411','user':'niorf'}]}})
 print param.getValues()
 print len(param_tracker)

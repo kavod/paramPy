@@ -11,9 +11,9 @@ import Value
 import Trigger
 
 ##############
-## PointCusto
+## ConfigElement
 ##############
-class PointCusto(object):
+class ConfigElement(object):
 	def __init__(self,id,type,label=None,placeholder=None,required=False,choices=[],default=None,value=None,trigger={}):
 		# ID
 		self.id = str(id)
@@ -67,12 +67,12 @@ class PointCusto(object):
 		if not isinstance(trigger,Trigger.Trigger):
 			trigger = Trigger.Trigger(trigger)
 		for key in trigger.keys():
-			if key != '*' and not self.validateSingle(key):
+			if key != '*' and key is not None and not self.validateSingle(key):
 				raise ValueError(str(key) + ' not correct for ' + str(self.id))
 		self.trigger = trigger
 		
 	def __str__(self):
-		return '<PointCusto {0} (Type:{1}, required:{2}, Choices:{3})>'.format(self.id,self.type, str(self.required), str(len(self.choices)))
+		return '<ConfigElement {0} (Type:{1}, required:{2}, Choices:{3})>'.format(self.id,self.type, str(self.required), str(len(self.choices)))
 		
 	def __deepcopy__(self,memo):
 		newone = type(self)(id=self.id,type=self.type,label=self.label,placeholder=self.placeholder,required=self.required,default=self.default,value=self.value,trigger={})
@@ -90,9 +90,6 @@ class PointCusto(object):
 				return str(value)
 			else:
 				return int(value)
-			
-	def getType(self):
-		return self.type
 
 	def validate(self,value,emptyAllowed=True):
 		if isinstance(value,list):
@@ -155,17 +152,21 @@ class PointCusto(object):
 	def getStatus(self):
 		return self.trigger[self.value]
 
+	def isNone(self):
+		return self.value == None
+
 ##############
 ## Param
 ##############
 class Param(object):
-	def __init__(self,id,multi=False,label="",items=[],filename=None):
+	def __init__(self,id,multi=False,label="",items=[],filename=None,trigger=[]):
 		self.id = str(id)
 		self.multi = multi
 		self.label = str(label) if str(label) is not None else self.id
 		self.items = []
 		self.addItems(items)
 		self.filename = filename if filename is not None else None
+		self.trigger = trigger
 		
 	def __str__(self):
 		return '<Param {0} ({1} items, Multi:{2})>'.format(self.id,str(len(self.items)),str(self.multi))
@@ -177,21 +178,27 @@ class Param(object):
 		return len(self.items)
 		
 	def __deepcopy__(self,memo):
-		newone = type(self)(id=self.id,label=self.label,items=[],filename=self.filename)
+		newone = type(self)(id=self.id,label=self.label,items=[],filename=self.filename,trigger=[])
 		newone.items = copy.deepcopy(self.items)
+		newone.trigger = copy.deepcopy(self.trigger)
 		return newone
 		
 	def __getitem__(self,key):
-		if not isinstance(key,int):
-			raise TypeError("Param indices must be integers, not " + type(key))
-		return self.items[key]
+		if isinstance(key,int):
+			return self.items[key]
+		if isinstance(key,str):
+			for item in self.items:
+				if item.id == key:
+					return item
+			raise IndexError("list assignment index out of range")
+		raise TypeError("Param indices must be integers or str, not " + type(key))
 		
 	def __setitem__(self,key,item):
 		if not isinstance(key,int):
 			raise TypeError("Param indices must be integers, not " + type(key))
 		key_int = int(key)
-		if not isinstance(item,PointCusto) or isinstance(item,Param):
-			raise TypeError("Param items only accept PointCusto or Param, not " + type(key))
+		if not isinstance(item,ConfigElement) or isinstance(item,Param):
+			raise TypeError("Param items only accept ConfigElement or Param, not " + type(key))
 		if key_int < 0 or key_int > len(self.items) -1:
 			raise IndexError("list assignment index out of range")
 		self.items[key_int] = item
@@ -203,15 +210,24 @@ class Param(object):
 		if key_int < 0 or key_int > len(self.items) -1:
 			raise IndexError("list assignment index out of range")
 		del self.items[key_int]
-		
-	def getType(self):
-		return "param"
+
+	def getStatus(self,key=None):
+		if key is None:
+			return ''
+		if self[key].getStatus() != "":
+			return self[key].getStatus()
+		else:
+			for trig in self.trigger:
+				if all(x in trig.keys() for x in ['src_id','src_status','dst_id','dst_status']):
+					if self[trig['src_id']].getStatus() == trig['src_status'] and key == trig['dst_id']:
+						return trig['dst_status']
+		return ''
 		
 	def addItem(self,item):
 		if len([it for it in self.items if it.id == item.id])>0:
 			raise ParamExceptions.IdAlreadyUsed('402',str(item.id) + ' already used as ID')
 		if not self.validate(item):
-			raise ParamExceptions.WrongValue('401',str(item) + ' not correct for Param or PointCusto')
+			raise ParamExceptions.WrongValue('401',str(item) + ' not correct for Param or ConfigElement')
 		self.items.append(copy.deepcopy(item))
 		
 	def addItems(self,items):
@@ -226,10 +242,11 @@ class Param(object):
 			raise ParamExceptions.WrongValue('406','Param {0} is empty'.format(str(len(self.items))))
 		result = []
 		for item in self.items:
-			item.cliPrompt()
+			if self.getStatus(item.id) != 'disabled':
+				item.cliPrompt()
 	
 	def validate(self,item):
-		if not isinstance(item,PointCusto) and not isinstance(item,Param):
+		if not isinstance(item,ConfigElement) and not isinstance(item,Param):
 			return False
 		return True
 		
@@ -263,14 +280,18 @@ class Param(object):
 		for item in self.items:
 			item.resetValue()
 
+	def isNone(self):
+		return all(item.isNone() or self.getStatus(item.id) == 'disabled' for item in self.items)
+
 ##############
 ## ParamMulti
 ##############	
 class ParamMulti(Param):
-	def __init__(self,id,multi=True,label="",items=[],filename=None):
+	def __init__(self,id,multi=True,label="",items=[],filename=None,trigger=[]):
 		Param.__init__(self,id,multi=True,label=label,items=[],filename=filename)
 		self.values = []
 		self.addItems(items)
+		self.trigger = trigger
 		
 	def __str__(self):
 		return '<ParamMulti {0} ({1} items, Multi:{2}, ValueSets:{3})>'.format(self.id,str(len(self.items)),str(self.multi),str(len(self.values)))
@@ -279,11 +300,12 @@ class ParamMulti(Param):
 		newone = type(self)(id=self.id,label=self.label,items=[],filename=self.filename)
 		newone.items = copy.deepcopy(self.items)
 		newone.values = copy.deepcopy(self.values)
+		newone.trigger = copy.deepcopy(self.trigger)
 		return newone
 
 	def addItem(self,item):
 		if len(self.values)>0:
-			print "Warning! The values of {0} has been reset since adding a new PointCusto".format(self.id)
+			print "Warning! The values of {0} has been reset since adding a new ConfigElement".format(self.id)
 			self.resetValue()
 		Param.addItem(self,item)
 		
@@ -299,9 +321,9 @@ class ParamMulti(Param):
 			raise ParamExceptions.WrongValue('401',str(json) + ' not correct for ' + str(self.id))
 		self.values = []
 		for item in json:
-			newitem = self.items
+			newitem = Param(id=self.id,multi=False,label=self.label,items=copy.deepcopy(self.items),filename=None,trigger=self.trigger)
 			for key in item.keys():
-				for it in newitem:
+				for it in newitem.items:
 					if str(it.id) == str(key):
 						if isinstance(it,Param):
 							it.loadValuesFromJSON(json[key])
@@ -311,50 +333,45 @@ class ParamMulti(Param):
 						break
 			if len(item)>0:
 				raise ParamExceptions.WrongValue('403',str(item[0]) + ' not correct for ' + str(self.id))
-			self.values.append(copy.deepcopy(newitem))
+			self.values.append(newitem)
 
 	def cliPrompt(self):
 		if len(self) < 1:
 			raise ParamExceptions.WrongValue('406','ParamMulti {0} is empty'.format(self.id))
 		while True:
-			newitem = copy.deepcopy(self.items)
-			for item in newitem:
-				item.cliPrompt()
-			self.values.append(newitem)
-			if not Prompt.promptYN('Another {0}?'.format(self.label),default='n'):
+			newitem = Param(id=self.id,multi=False,label=self.label,items=copy.deepcopy(self.items),filename=None,trigger=self.trigger)
+			newitem.cliPrompt()
+			if not newitem.isNone():
+				self.values.append(newitem)
+				if not Prompt.promptYN('Another {0}?'.format(self.label),default='n'):
+					break
+			else:
 				break
 				
 	def getValues(self,mode='json'):
 		result = []
 		for value in self.values:
-			result1 = {}
-			for item in value:
-				result1.update(copy.deepcopy({item.id:item.getValues()}))
-			result.append(result1)
+			result.append(copy.deepcopy(value.getValues()))
 		return result
-		
-	def checkValues(self):
-		for value in self.values:
-			for item in value:
-				print item.id + " > " + item.getValues()
-				
+
 	def resetValue(self):
 		self.values = []
+
 '''
 if __name__ == '__main__':
-	p1 = PointCusto('id','text',multi=False,label='Torrents provider',placeholder="Indicate your torrents provider",required=True,choices={'t411':'T411','kickass':'KickAss'},condition=[],default='kickass')
+	p1 = ConfigElement('id','text',multi=False,label='Torrents provider',placeholder="Indicate your torrents provider",required=True,choices={'t411':'T411','kickass':'KickAss'},condition=[],default='kickass')
 	p1.cliPrompt()
-	p2 = PointCusto('user','text',multi=False,label='Torrents provider username',placeholder="Indicate your torrents provider user",required=False,choices=[],condition=[],default=None)
-	p3 = PointCusto('password','password',multi=False,label='Torrents provider password',placeholder="Indicate your torrents provider password",required=False,choices=[],condition=[],default=None)'''
+	p2 = ConfigElement('user','text',multi=False,label='Torrents provider username',placeholder="Indicate your torrents provider user",required=False,choices=[],condition=[],default=None)
+	p3 = ConfigElement('password','password',multi=False,label='Torrents provider password',placeholder="Indicate your torrents provider password",required=False,choices=[],condition=[],default=None)'''
 """
 	param_tracker = ParamMulti(id='tracker',label='Torrent providers',items=[p1,p2,p3],filename=None)
 	
-	p4 = PointCusto('server','text',multi=False,label='Transmission server',placeholder="Indicate the transmission address",required=True,choices=[],condition=[],default=None)
-	p5 = PointCusto('port','number',multi=False,label='Transmission port',placeholder="Indicate the transmission port",required=True,choices=[],condition=[],default=51413)
-	p6 = PointCusto('user','text',multi=False,label='Transmission username',placeholder="Indicate the transmission username",required=False,choices=[],condition=[],default=None)
-	p7 = PointCusto('password','password',multi=False,label='Transmission password',placeholder="Indicate the transmission password",required=False,choices=[],condition=[],default=None)
-	p8 = PointCusto('slots','number',multi=False,label='Transmission maximum slots',placeholder="Indicate the maximum number of simultaneous slots",required=True,choices=[],condition=[],default=6)
-	p9 = PointCusto('transfer','text',multi=False,label='Local transfer directory',placeholder="Indicate the target local directory (keep blank for disable)",required=False,choices=[],condition=[],default=None)
+	p4 = ConfigElement('server','text',multi=False,label='Transmission server',placeholder="Indicate the transmission address",required=True,choices=[],condition=[],default=None)
+	p5 = ConfigElement('port','number',multi=False,label='Transmission port',placeholder="Indicate the transmission port",required=True,choices=[],condition=[],default=51413)
+	p6 = ConfigElement('user','text',multi=False,label='Transmission username',placeholder="Indicate the transmission username",required=False,choices=[],condition=[],default=None)
+	p7 = ConfigElement('password','password',multi=False,label='Transmission password',placeholder="Indicate the transmission password",required=False,choices=[],condition=[],default=None)
+	p8 = ConfigElement('slots','number',multi=False,label='Transmission maximum slots',placeholder="Indicate the maximum number of simultaneous slots",required=True,choices=[],condition=[],default=6)
+	p9 = ConfigElement('transfer','text',multi=False,label='Local transfer directory',placeholder="Indicate the target local directory (keep blank for disable)",required=False,choices=[],condition=[],default=None)
 	param_transmission = Param(id='transmission',label='Transmission',items=[p4,p5,p6,p7,p8,p9],filename=None)
 
 	param = Param(id='conf',label="Configuration",items=[param_tracker,param_transmission],filename=None)
