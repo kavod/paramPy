@@ -53,14 +53,17 @@ def globalPrompt(custo,warning=''):
 						warning=str(warning)
 						)
 	else:'''
-	return promptSingle(
-					custo.placeholder,
-					choix=custo.choices,
-					password=(custo.type=='password'),
-					mandatory=custo.required,
-					default=custo.default,
-					warning=str(warning)
-					)
+	if custo.type == 'boolean':
+		return promptYN(custo.placeholder,default=custo.default)
+	else:
+		return promptSingle(
+						custo.placeholder,
+						choix=custo.choices,
+						password=(custo.type=='password'),
+						mandatory=custo.required,
+						default=custo.default,
+						warning=str(warning)
+						)
 		
 def promptSingle(question,choix=[],password=False,mandatory=False,default=None,warning=''):
 	if len(choix)>0:

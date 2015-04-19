@@ -88,6 +88,8 @@ class ConfigElement(object):
 		else:
 			if self.type == "text" or self.type == "password" or self.type == "file" or self.type == 'email':
 				return str(value)
+			elif self.type == "boolean":
+				return bool(value)
 			else:
 				return int(value)
 
@@ -118,6 +120,9 @@ class ConfigElement(object):
 				return True
 			elif not re.match(r"[^@]+@[^@]+\.[^@]+", value):
 				return False
+		elif self.type == "boolean":
+			if not isinstance(value,bool):
+				return False
 		else:
 			return False
 		if len(self.choices)>0 and value not in self.choices:
@@ -143,17 +148,38 @@ class ConfigElement(object):
 				return
 			warning='Incorrect answer'
 			
-	def getValues(self,mode='json'):
-		if self.type == 'password':
+	def getValues(self,hidePassword=True,mode='json'):
+		if hidePassword and self.type == 'password':
 			return '****'
 		else:
 			return self.value
+
+	def toJSON(self):
+		return {
+				'id':			self.id,
+				'type':			self.type,
+				'label':		self.label,
+				'placeholder':	self.placeholder,
+				'required':		self.required,
+				'choices':		self.choices,
+				'default':		self.default,
+				'trigger':		self.trigger
+				}
 	
 	def getStatus(self):
 		return self.trigger[self.value]
 
 	def isNone(self):
 		return self.value == None
+
+def ConfigElementFromJSON(json):
+	label = json['label'] if 'label' in json.keys() else None
+	placeholder = json['placeholder'] if 'placeholder' in json.keys() else None
+	required = json['required'] if 'required' in json.keys() else None
+	choices = json['choices'] if 'choices' in json.keys() else []
+	default = json['default'] if 'default' in json.keys() else None
+	trigger = json['trigger'] if 'trigger' in json.keys() else {}
+	return ConfigElement(id=json['id'],type=json['type'],label=label,placeholder=placeholder,required=required,choices=choices,default=default,trigger=trigger)
 
 ##############
 ## Param
@@ -213,13 +239,18 @@ class Param(object):
 
 	def getStatus(self,key=None):
 		if key is None:
+			for trig in self.trigger: 
+				if all(x in trig.keys() for x in ['src_id','src_status','dst_id','dst_status']) and trig['src_id'] != 'self' and trig['dst_id'] == 'self':
+					if self[trig['src_id']].getStatus() == trig['src_status']:
+						return trig['dst_status']
 			return ''
 		if self[key].getStatus() != "":
 			return self[key].getStatus()
 		else:
 			for trig in self.trigger:
 				if all(x in trig.keys() for x in ['src_id','src_status','dst_id','dst_status']):
-					if self[trig['src_id']].getStatus() == trig['src_status'] and key == trig['dst_id']:
+					src = self if trig['src_id'] == 'self' else self[trig['src_id']]
+					if src.getStatus() == trig['src_status'] and key == trig['dst_id']:
 						return trig['dst_status']
 		return ''
 		
@@ -240,7 +271,6 @@ class Param(object):
 	def cliPrompt(self):
 		if len(self) < 1:
 			raise ParamExceptions.WrongValue('406','Param {0} is empty'.format(str(len(self.items))))
-		result = []
 		for item in self.items:
 			if self.getStatus(item.id) != 'disabled':
 				item.cliPrompt()
@@ -250,16 +280,16 @@ class Param(object):
 			return False
 		return True
 		
-	def getValues(self,mode='json'):
+	def getValues(self,hidePassword=True,mode='json'):
 		result = {}
 		for item in self.items:
-			result.update(copy.deepcopy({item.id:item.getValues()}))
+			result.update(copy.deepcopy({item.id:item.getValues(hidePassword)}))
 		return result
 
 	def loadValuesFromJSON(self,values):
 		if not isinstance(values,dict):
 			raise ParamExceptions.WrongValue('401',str(values) + ' not correct for ' + str(self.id))
-		if self.id not in values.keys():
+		if str(self.id) not in [str(key) for key in values.keys()]:
 			raise ParamExceptions.WrongValue('407',str(self.id) + ' not in input')
 		json = values[self.id]
 		if not isinstance(json,dict):
@@ -268,7 +298,7 @@ class Param(object):
 			for it in self.items:
 				if str(it.id) == str(key):
 					if isinstance(it,Param):
-						it.loadValuesFromJSON({key:json[key]})
+						it.loadValuesFromJSON({str(key):json[key]})
 					else:
 						it.setValue(json[key])
 					del json[key]
@@ -282,6 +312,48 @@ class Param(object):
 
 	def isNone(self):
 		return all(item.isNone() or self.getStatus(item.id) == 'disabled' for item in self.items)
+
+	def toJSON(self):
+		return {
+				'id': 		self.id,
+				'type':		'Param',
+				'label':	self.label,
+				'items':	[item.toJSON() for item in self.items],
+				'trigger':	self.trigger
+				}
+
+	def loadFromFile(self,filename=None):
+		if filename is None and self.filename is None:
+			raise AttributeError("No filename provided")
+		if filename is not None:
+			self.filename = filename
+		with open(self.filename) as data_file:   
+			content = json.load(data_file) 
+			self.loadValuesFromJSON({self.id:content})
+
+	def saveToFile(self,filename=None):
+		if filename is None and self.filename is None:
+			raise AttributeError("No filename provided")
+		if filename is not None:
+			self.filename = filename
+		with open(self.filename, "w") as outfile:
+			json.dump(self.getValues(hidePassword=False), outfile, ensure_ascii=False)
+
+
+def ParamFromJSON(json):
+	id = json['id']
+	label = json['label'] if 'label' in json.keys() else None
+	items = []
+	if 'items' in json.keys():
+		for item in json['items']:
+			if item['type'] == 'Param':
+				items.append(ParamFromJSON(item))
+			elif item['type'] == 'ParamMulti':
+				items.append(ParamMultiFromJSON(item))
+			else:
+				items.append(ConfigElementFromJSON(item))
+	trigger = json['trigger'] if 'trigger' in json.keys() else {}
+	return Param(id,label=label,items=items,trigger=trigger)
 
 ##############
 ## ParamMulti
@@ -326,7 +398,7 @@ class ParamMulti(Param):
 				for it in newitem.items:
 					if str(it.id) == str(key):
 						if isinstance(it,Param):
-							it.loadValuesFromJSON(json[key])
+							it.loadValuesFromJSON({str(it.id):item[key]})
 						else:
 							it.setValue(item[key])
 						del item[key]
@@ -348,14 +420,38 @@ class ParamMulti(Param):
 			else:
 				break
 				
-	def getValues(self,mode='json'):
+	def getValues(self,hidePassword=True,mode='json'):
 		result = []
 		for value in self.values:
-			result.append(copy.deepcopy(value.getValues()))
+			result.append(copy.deepcopy(value.getValues(hidePassword)))
 		return result
 
 	def resetValue(self):
 		self.values = []
+
+	def toJSON(self):
+		return {
+				'id': 		self.id,
+				'type':		'ParamMulti',
+				'label':	self.label,
+				'items':	[item.toJSON() for item in self.items],
+				'trigger':	self.trigger
+				}
+
+def ParamMultiFromJSON(json):
+	id = json['id']
+	label = json['label'] if 'label' in json.keys() else None
+	items = []
+	if 'items' in json.keys():
+		for item in json['items']:
+			if item['type'] == 'Param':
+				items.append(ParamFromJSON(item))
+			elif item['type'] == 'ParamMulti':
+				items.append(ParamMultiFromJSON(item))
+			else:
+				items.append(ConfigElementFromJSON(item))
+	trigger = json['trigger'] if 'trigger' in json.keys() else {}
+	return ParamMulti(id,label=label,items=items,trigger=trigger)
 
 '''
 if __name__ == '__main__':

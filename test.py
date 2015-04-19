@@ -14,6 +14,8 @@ tracker_id = paramPy.ConfigElement(
 		default=None,
 		trigger={'kickass':'NoLogin',None:'NoLogin'}
 		)
+export = tracker_id.toJSON()
+tracker_id1 = paramPy.ConfigElementFromJSON(export)
 
 tracker_user = paramPy.ConfigElement(
 		id="user",
@@ -35,25 +37,54 @@ tracker_password = paramPy.ConfigElement(
 		default=None
 		)
 
+email_enable = paramPy.ConfigElement(
+		id="email_enabled",
+		type="boolean",
+		label="Email activation",
+		placeholder="Activate email notification?",
+		required="True",
+		choices=[],
+		default=False
+		)
+
+version = paramPy.ConfigElement(
+		id="version",
+		type="text",
+		trigger={'*':'disabled'}
+		)
+version.setValue("2.0")
+
 trigger = [
-		{'src_id':'id','src_status':'NoLogin','dst_id':'user','dst_status':'disabled'},
-		{'src_id':'id','src_status':'NoLogin','dst_id':'password','dst_status':'disabled'}
+		{'src_id':'id','src_status':'NoLogin','dst_id':'login','dst_status':'disabled'}
 		]
+
+tracker_login = paramPy.Param(
+		id='login',
+		label='Torrent provider login',
+		items=[tracker_user,tracker_password],
+		trigger={}
+		)
 
 param_tracker = paramPy.ParamMulti(
 		id='tracker',
 		label="Torrent provider",
-		items=[tracker_id,tracker_user,tracker_password],
+		items=[tracker_id1,tracker_login],
 		trigger=trigger
 		)
 
 param = paramPy.Param(
 		id='conf',
-		items=[param_tracker]
+		items=[version,param_tracker,email_enable]
 		)
+values = param.getValues()
+export = param.toJSON()
+param1 = paramPy.ParamFromJSON(export)
+param1.loadValuesFromJSON({'conf':values})
 
-param.cliPrompt()
-print param.getValues()
-param.loadValuesFromJSON({'conf':{'tracker':[{'id':'t411','user':'niorf'}]}})
-print param.getValues()
-print len(param_tracker)
+'''param1.loadFromFile('test.json')
+print param1.getValues()
+print "ok"
+sys.exit()'''
+param1.cliPrompt()
+print param1.getValues()
+param1.saveToFile("test.json")
