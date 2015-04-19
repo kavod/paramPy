@@ -7,7 +7,6 @@ import re
 import copy
 import Prompt
 import ParamExceptions
-import Value
 import Trigger
 
 ##############
@@ -274,6 +273,24 @@ class Param(object):
 		for item in self.items:
 			if self.getStatus(item.id) != 'disabled':
 				item.cliPrompt()
+				
+	def cliChange(self):
+		choices = {}
+		width = len(max([i.label for i in self.items], key=len))
+		for key,item in enumerate(self.items):
+			if isinstance(item,ConfigElement):
+				value = item.value
+			elif isinstance(item,ParamMulti):
+				value = '{0} managed'.format(str(len(item)))
+			else:
+				value = ''
+			line = ("{0:" + str(width)+"} - {1}").format(item.label,value)
+			choices.update({key:line})
+		reponse = Prompt.promptChoice(str(self.label),choices,warning='',selected=[],default = None,mandatory=True,multi=False)
+		if isinstance(self.items[reponse],ConfigElement):
+			self.items[reponse].cliPrompt()
+		else:
+			self.items[reponse].cliChange()
 	
 	def validate(self,item):
 		if not isinstance(item,ConfigElement) and not isinstance(item,Param):

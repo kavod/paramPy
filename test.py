@@ -74,6 +74,7 @@ param_tracker = paramPy.ParamMulti(
 
 param = paramPy.Param(
 		id='conf',
+		label='Configuration',
 		items=[version,param_tracker,email_enable]
 		)
 values = param.getValues()
@@ -81,10 +82,11 @@ export = param.toJSON()
 param1 = paramPy.ParamFromJSON(export)
 param1.loadValuesFromJSON({'conf':values})
 
-'''param1.loadFromFile('test.json')
+param1.loadFromFile('test.json')
 print param1.getValues()
 print "ok"
-sys.exit()'''
-param1.cliPrompt()
-print param1.getValues()
+param1.cliChange()
 param1.saveToFile("test.json")
+"""param1.cliPrompt()
+print param1.getValues()
+param1.saveToFile("test.json")"""
